@@ -1,0 +1,288 @@
+---
+title: "Flexdashboard"
+author: Lina Spokauskaite
+output: flexdashboard::flex_dashboard
+runtime: shiny
+
+---
+
+<style>                     
+.navbar {
+  background-color:#E69F00;
+  border-color:#E69F00;
+}
+.navbar-brand {
+color:#999999!important;
+}
+</style> 
+
+```{r global, include=FALSE}
+# load data in 'global' chunk so it can be shared by all users of the dashboard
+library(flexdashboard)
+library(tidyverse)
+library(lubridate)
+library(shiny)
+library(plotly)
+
+
+# Load data
+cris <- read.csv("Crisis_Data .csv")
+
+cris3 <- select(cris, c('Occurred.Date...Time','Disposition',
+                        'Precinct','Officer.Race','CIT.Certified.Indicator',
+                        'Use.of.Force.Indicator'
+                        ))
+
+# Extract year
+cris3$Occurred.Date...Time<-mdy_hm(cris3$Occurred.Date...Time)
+cris3$year<-year(cris3$Occurred.Date...Time)
+
+# Filtering out the neutral outcomes
+cris3 <- filter(cris3, !Disposition %in% c("-","Other","Unable to Contact","No Action Possible / Necessary"))
+
+# Create the column of outcomes, 0 for negative, 1 for positive
+cris3$outcome<-ifelse(cris3$Disposition %in% c("Arrested (requires arrest report)","Subject Arrested","Chronic Complaint", "Resources Declined", "Resources Offered / Declined") | cris3$Use.of.Force.Indicator=="Y", 0,1)
+
+# Convert outcome to factor
+cris3$outcome<-factor(cris3$outcome)
+
+
+# Filter race
+cris3 <- filter(cris3,`Officer.Race` %in% c("American Indian/Alaska Native","Asian",
+                                           "Black or African American","Hispanic or Latino",
+                                           "Nat Hawaiian/Oth Pac Islander","Two or More Races",
+                                           "White"))
+
+# Filter precinct name
+cris3<-filter (cris3,Precinct %in% c("East","North",
+                                     "South","SouthWest", "West"))
+
+
+```
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+```{r}
+
+# generate shiny inputs  fields
+selectInput("var1", label = "Select Variable for Time-series:", 
+    choices = c('Outcome','Use of Force  Indicator'), selected = 'Outcome')
+
+sliderInput("year_range", label = "Select year range:", 
+           min = 2015, max = 2020, value = c(2015,2020), step = 1,sep = "")
+```
+
+-----------------------------------------------------------------------
+
+
+
+### Plot 1
+
+```{r }
+
+
+
+
+renderPlot({
+  variable <- input$var1
+  year_range <- input$year_range
+  cris3[,'year'] <- as.numeric(as.character(cris3[,'year'] ))
+  
+   cris4 <- cris3[cris3[,'year']>=as.numeric(year_range[1]),]
+   cris4 <- cris4[cris4[,'year']<=as.numeric(year_range[2]),]
+
+  if (variable=='Outcome'){
+    data1 <- cris4 %>% 
+      group_by(year) %>% count(`outcome`) %>%
+      mutate(percentage = (n/sum(n))*100)
+
+    ggplot(data = data1, aes(x = year, y = percentage, group = `outcome`))+
+
+      geom_line(aes(col =`outcome`))+
+
+      geom_point(aes(col =`outcome`))+
+      ylim(0,110)+
+      geom_text(aes(label=paste0(round(percentage,0),'%')),size=3,fontface = "bold",vjust=-1.5)+
+      
+      scale_color_manual(values=c("#999999", "#E69F00"))+
+      
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+   
+    
+  } else{
+    data1 <- cris4 %>% group_by(year) %>% count(`Use.of.Force.Indicator`) %>%
+
+    mutate(percentage = (n/sum(n))*100)
+
+    ggplot(data = data1, aes(x = year, y = percentage, group = `Use.of.Force.Indicator`))+
+
+      geom_line(aes(col =`Use.of.Force.Indicator`))+
+
+      geom_point(aes(col =`Use.of.Force.Indicator`))+
+      ylim(0,120)+
+      scale_color_manual(values=c("#999999", "#E69F00"))+
+      
+      geom_text(aes(label=paste0(round(percentage,0),'%')),size=3,fontface = "bold",vjust=-1.5)+
+      
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+  }
+  
+  
+})
+
+
+
+```
+
+
+
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Plot 2
+
+```{r }
+
+
+map_data <- read.csv('map_data.csv')
+
+cris4 <- cris3  %>% group_by(Precinct) %>% 
+  count(`CIT.Certified.Indicator`) %>%
+  mutate(Percentage.CIT.Certified = (n/sum(n))*100) %>%
+  filter(`CIT.Certified.Indicator`=='Y') %>%
+  dplyr::select(Precinct,Percentage.CIT.Certified)
+
+cris5 <- cris3  %>% group_by(Precinct) %>% 
+  count(`outcome`) %>%
+  mutate(`Percentage.positive.outcome` = (n/sum(n))*100) %>%
+  filter(`outcome`=='1') %>%
+  dplyr::select(Precinct,Percentage.positive.outcome)
+
+cris6 <- cris3  %>% group_by(Precinct) %>% 
+  count(`Use.of.Force.Indicator`) %>%
+  mutate(`Percentage.use.of.force` = (n/sum(n))*100) %>%
+  filter(`Use.of.Force.Indicator`=='Y') %>%
+  dplyr::select(Precinct,Percentage.use.of.force)
+
+Precinct_map <- merge(cris4,map_data,by='Precinct')
+Precinct_map <- merge(cris5,Precinct_map,by='Precinct')
+Precinct_map <- merge(cris6,Precinct_map,by='Precinct')
+
+Precinct_map[,"Percentage.CIT.Certified"] <- round(Precinct_map[,"Percentage.CIT.Certified"],0)
+Precinct_map[,"Percentage.positive.outcome"] <- round(Precinct_map[,"Percentage.positive.outcome"],0)
+Precinct_map[,"Percentage.use.of.force"] <- round(Precinct_map[,"Percentage.use.of.force"],0)
+Precinct_map[,"Latitude"] <- round(Precinct_map[,"Latitude"],2)
+Precinct_map[,"Longitude"] <- round(Precinct_map[,"Longitude"],2)
+
+
+hovertext = paste0("Precinct: ",Precinct_map[,"Precinct"]) 
+
+size =Precinct_map[,"Percentage.CIT.Certified"]
+
+text_ <- paste0('Precinct: ',Precinct_map[,"Precinct"],
+                "\nCIT certified: ",Precinct_map[,"Percentage.CIT.Certified"],"%",
+                "\nPositive outcome: ",Precinct_map[,"Percentage.positive.outcome"],"%",
+                "\nUse of force: ",Precinct_map[,"Percentage.use.of.force"],"%"
+                )
+
+m <- list(
+  l = 1,
+  r = 1,
+  b = 1,
+  t = 1,
+  pad = 4
+)
+fig <- Precinct_map 
+fig <- fig %>%
+  plot_ly(
+    lat = ~Latitude,
+    lon = ~Longitude,
+    marker = list(size=size,
+                           sizemode='area',
+                           sizeref=2*max(size)/10,
+                           sizemin=8,
+                           opacity = 0.8,
+                  color='#E69F00'
+    ),
+    type = 'scattermapbox',
+    hovertext = text_,
+    hoverinfo = "text"
+  )
+fig <- fig %>%
+  layout(
+    mapbox = list(
+      style = 'open-street-map',
+      zoom =8.5,
+      center = list(lon = -122.3, lat = 47.5))) 
+fig <- fig %>% layout(autosize = F, margin = m)
+fig
+
+
+
+```
+
+
+### Plot 3
+
+```{r}
+
+
+renderPlot({
+  variable <- input$var1
+  year_range <- input$year_range
+  cris3[,'year'] <- as.numeric(as.character(cris3[,'year'] ))
+  cris4 <- cris3[cris3[,'year']>=as.numeric(year_range[1]),]
+  cris4 <- cris4[cris4[,'year']<=as.numeric(year_range[2]),]
+  
+  if (variable=='Outcome'){
+    cris4 %>%
+      group_by(`Officer.Race`, outcome) %>% 
+      count(`CIT.Certified.Indicator`) %>%
+      mutate(Percentage.CIT.Certified = (n/sum(n))*100) %>%
+      filter(`CIT.Certified.Indicator`=='Y') %>%
+      ggplot(mapping = aes(x = Officer.Race, 
+                           y = Percentage.CIT.Certified, 
+                           fill = `outcome`)) + 
+      geom_bar(stat = "identity", position = "dodge") +
+      ylim(0,50)+
+      geom_text(aes(label=paste0(round(Percentage.CIT.Certified,0),'%')),position = 
+                  position_dodge(0.9),size=3,hjust=-0.3,fontface = "bold")+
+      coord_flip()+
+      guides(fill = guide_legend(reverse = TRUE))+
+      
+      scale_fill_manual(values=c("#999999", "#E69F00"))+
+      
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+  } else{
+    
+    data2 <- cris4 %>%
+      group_by(`Officer.Race`, `Use.of.Force.Indicator`) %>% 
+      count(`CIT.Certified.Indicator`) %>%
+      mutate(Percentage.CIT.Certified = (n/sum(n))*100) %>%
+      filter(`CIT.Certified.Indicator`=='Y')
+    
+
+      ggplot(data=data2,mapping = aes(x = Officer.Race, 
+                           y = Percentage.CIT.Certified, 
+                           fill = `Use.of.Force.Indicator`)) + 
+      geom_bar(stat = "identity", position = "dodge") +
+      ylim(0,50)+
+      geom_text(aes(label=paste0(round(Percentage.CIT.Certified,0),'%')),position = 
+                  position_dodge(0.9),size=3,hjust=-0.3,fontface = "bold")+
+      coord_flip()+
+      guides(fill = guide_legend(reverse = TRUE))+
+      
+      scale_fill_manual(values=c("#999999", "#E69F00"))+
+      
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+  }
+})
+
+```
+
+
